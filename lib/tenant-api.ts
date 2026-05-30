@@ -1,3 +1,11 @@
+import type {
+  BookingDataResponse as GeneratedBookingDataResponse,
+  BookingInvoiceDataResponse,
+  BookingPaymentDataResponse,
+  BookingReceiptDataResponse,
+  BookingStatus,
+} from "@/generated/generated";
+
 const DEFAULT_API_BASE_URL = "http://localhost:8084/api";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? process.env.BACKEND_URL ?? DEFAULT_API_BASE_URL;
@@ -80,26 +88,28 @@ export type BookingPayload = {
   check_out: string;
 };
 
-export type BookingInvoiceResponse = {
-  readonly id: number;
-  readonly invoice_number: string;
-  readonly subtotal: string;
-  readonly discount: string;
-  readonly total_amount: string;
-  readonly amount_paid: string;
-  readonly amount_due: string;
-  readonly status: string;
-  readonly issued_at: string;
-  readonly due_at: string;
+export type { BookingInvoiceDataResponse, BookingPaymentDataResponse, BookingReceiptDataResponse, BookingStatus };
+
+export type BookingInvoiceResponse = BookingInvoiceDataResponse;
+export type BookingPaymentResponse = BookingPaymentDataResponse;
+export type BookingReceiptResponse = BookingReceiptDataResponse;
+
+export type BookingPaymentPayload = {
+  amount: string;
+  type: "full_payment" | "down_payment";
+  method: string;
+  reference?: string;
+  paid_at: string;
 };
 
-export type BookingDataResponse = Partial<BookingPayload> & {
+export type BookingStatusPayload = {
+  status: BookingStatus;
+};
+
+/** API booking shape from generated types, plus optional legacy list/detail fields. */
+export type BookingDataResponse = GeneratedBookingDataResponse & {
   readonly id: string | number;
-  readonly tenant_id?: string;
-  readonly user_id?: number;
-  readonly room?: string;
   readonly discount?: string | number;
-  readonly status?: string;
   readonly total?: string | number;
   readonly total_price?: string | number;
   readonly email?: string;
@@ -107,7 +117,6 @@ export type BookingDataResponse = Partial<BookingPayload> & {
   readonly check_in_date?: string;
   readonly check_out_date?: string;
   readonly address?: string;
-  readonly invoice?: BookingInvoiceResponse;
 };
 
 export type PaginatedResponse<T> = {
@@ -377,6 +386,42 @@ export async function getTenantBooking(
     {
       method: "GET",
       headers: getAuthHeaders(token),
+    }
+  );
+
+  return parseApiResponse<BookingDataResponse>(response);
+}
+
+export async function payBookingInvoice(
+  token: string,
+  tenant: string,
+  booking: string | number,
+  payload: BookingPaymentPayload
+): Promise<BookingDataResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/bookings/${encodeURIComponent(String(booking))}/payments`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(token),
+      body: JSON.stringify(payload),
+    }
+  );
+
+  return parseApiResponse<BookingDataResponse>(response);
+}
+
+export async function updateBookingStatus(
+  token: string,
+  tenant: string,
+  booking: string | number,
+  payload: BookingStatusPayload
+): Promise<BookingDataResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/bookings/${encodeURIComponent(String(booking))}/status`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(token),
+      body: JSON.stringify(payload),
     }
   );
 

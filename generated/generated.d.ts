@@ -5,8 +5,10 @@ export type AuthDataResponse = {
 };
 export type BookingDataResponse = {
   readonly id: number;
+  readonly booking_number: string | null;
   readonly tenant_id: string | null;
   readonly user_id: number;
+  readonly room_id: number | null;
   readonly guest_name: string;
   readonly guest_phone: string | null;
   readonly guest_email: string | null;
@@ -20,6 +22,7 @@ export type BookingDataResponse = {
   readonly promo_code: string | null;
   readonly check_in: string;
   readonly check_out: string;
+  readonly status: string;
   readonly invoice: BookingInvoiceDataResponse | null;
 };
 export type BookingInvoiceDataResponse = {
@@ -33,6 +36,7 @@ export type BookingInvoiceDataResponse = {
   readonly status: string;
   readonly issued_at: string;
   readonly due_at: string | null;
+  readonly download_url: string;
   readonly payments: BookingPaymentDataResponse[];
 };
 export type BookingPaymentDataResponse = {
@@ -48,7 +52,15 @@ export type BookingReceiptDataResponse = {
   readonly id: number;
   readonly receipt_number: string;
   readonly issued_at: string;
+  readonly download_url: string;
 };
+export type BookingStatus =
+  | "pending"
+  | "confirmed"
+  | "check_in"
+  | "check_out"
+  | "completed"
+  | "cancelled";
 export type PermissionDataResponse = {
   readonly id: number;
   readonly name: string;

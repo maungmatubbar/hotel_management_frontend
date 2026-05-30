@@ -1,14 +1,15 @@
 import Link from "next/link";
-import { BedDouble, CalendarDays, MapPin, Search, ShieldCheck, Users } from "lucide-react";
+import { BedDouble, CalendarDays, Mail, MapPin, Phone, Search, ShieldCheck, UserRound, Users } from "lucide-react";
 import { HotelCard } from "@/components/hotel/HotelCard";
 import { Footer } from "@/components/layout/Footer";
 import { Navbar } from "@/components/layout/Navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { hotels } from "@/lib/mock-data";
 
-const bookingTabs = ["Stays", "Rooms", "Monthly stays", "Deals"];
 const popularDestinations = ["Cox's Bazar", "Dhaka", "Sylhet", "Chattogram"];
 const propertyTypes = [
   ["Hotels", "128 properties"],
@@ -23,22 +24,7 @@ export default function CustomerHomePage() {
       <Navbar />
       <section className="bg-slate-950 text-white">
         <div className="mx-auto max-w-7xl px-4 pb-24 pt-8 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap gap-3">
-            {bookingTabs.map((tab, index) => (
-              <button
-                key={tab}
-                className={`rounded-xl border px-5 py-2.5 text-sm font-semibold transition ${
-                  index === 0
-                    ? "border-white bg-white/10 text-white"
-                    : "border-white/15 text-white/75 hover:border-white/40 hover:text-white"
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-
-          <div className="relative mt-14 grid gap-10 lg:grid-cols-[0.95fr_0.55fr] lg:items-end">
+          <div className="relative grid gap-10 lg:grid-cols-[0.95fr_0.55fr] lg:items-end">
             <div>
               <Badge variant="inverted" className="px-4 py-2 text-sm">
                 Multi-tenant hotel booking platform
@@ -71,54 +57,88 @@ export default function CustomerHomePage() {
             </Card>
           </div>
 
-          <Card className="-mb-36 mt-12 border-4 border-cyan-400 bg-cyan-400 p-1 shadow-2xl shadow-slate-950/25 dark:border-cyan-400 dark:bg-cyan-400">
-            <div className="grid gap-1 lg:grid-cols-[1.25fr_0.85fr_0.85fr_0.7fr_auto]">
-              <div className="flex items-center gap-3 rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
-                <MapPin className="h-5 w-5 text-slate-500" />
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Destination
-                  </p>
-                  <p className="mt-1 font-semibold">Where are you going?</p>
-                </div>
+          <Card className="-mb-72 mt-12 border-4 border-cyan-400 bg-cyan-400 p-1 shadow-2xl shadow-slate-950/25 dark:border-cyan-400 dark:bg-cyan-400">
+            <form
+              action={`/hotel/${hotels[0].slug}/booking#payment`}
+              className="grid gap-1 rounded-2xl md:grid-cols-2 lg:grid-cols-6"
+            >
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
+                <Label htmlFor="check-in" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <CalendarDays className="h-4 w-4" />
+                  Check in
+                </Label>
+                <Input id="check-in" name="check_in" type="date" className="mt-2 border-slate-200" required />
               </div>
-              <div className="flex items-center gap-3 rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
-                <CalendarDays className="h-5 w-5 text-slate-500" />
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Dates
-                  </p>
-                  <p className="mt-1 font-semibold">Check-in - Check-out</p>
-                </div>
+
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
+                <Label htmlFor="check-out" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <CalendarDays className="h-4 w-4" />
+                  Check out
+                </Label>
+                <Input id="check-out" name="check_out" type="date" className="mt-2 border-slate-200" required />
               </div>
-              <div className="flex items-center gap-3 rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
-                <Users className="h-5 w-5 text-slate-500" />
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Guests
-                  </p>
-                  <p className="mt-1 font-semibold">2 adults, 1 room</p>
-                </div>
+
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
+                <Label htmlFor="guests" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <Users className="h-4 w-4" />
+                  Guests
+                </Label>
+                <Input id="guests" name="guests" type="number" min="1" defaultValue="2" className="mt-2 border-slate-200" required />
               </div>
-              <div className="flex items-center gap-3 rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
-                <BedDouble className="h-5 w-5 text-slate-500" />
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    Type
-                  </p>
-                  <p className="mt-1 font-semibold">Hotels</p>
-                </div>
+
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
+                <Label htmlFor="rooms" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <BedDouble className="h-4 w-4" />
+                  Rooms
+                </Label>
+                <Input id="rooms" name="rooms" type="number" min="1" defaultValue="1" className="mt-2 border-slate-200" required />
               </div>
-              <Button className="h-full min-h-16 rounded-xl bg-slate-950 px-8 text-base text-white hover:bg-slate-800 dark:bg-slate-950 dark:text-white">
-                <Search className="h-5 w-5" />
-                Search
+
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
+                <Label htmlFor="customer-address" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <MapPin className="h-4 w-4" />
+                  Address
+                </Label>
+                <Input id="customer-address" name="customer_address" placeholder="House, road, city" className="mt-2 border-slate-200" required />
+              </div>
+
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
+                <Label htmlFor="customer-name" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <UserRound className="h-4 w-4" />
+                  Customer name
+                </Label>
+                <Input id="customer-name" name="customer_name" placeholder="Enter full name" className="mt-2 border-slate-200" required />
+              </div>
+
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
+                <Label htmlFor="customer-email" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <Mail className="h-4 w-4" />
+                  Email
+                </Label>
+                <Input id="customer-email" name="customer_email" type="email" placeholder="customer@example.com" className="mt-2 border-slate-200" required />
+              </div>
+
+              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
+                <Label htmlFor="customer-phone" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  <Phone className="h-4 w-4" />
+                  Phone
+                </Label>
+                <Input id="customer-phone" name="customer_phone" type="tel" placeholder="+880 17..." className="mt-2 border-slate-200" required />
+              </div>
+
+              <Button
+                type="submit"
+                className="min-h-12 self-end rounded-xl bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 dark:bg-slate-950 dark:text-white lg:col-span-1"
+              >
+                <Search className="h-4 w-4" />
+                Book now
               </Button>
-            </div>
+            </form>
           </Card>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 pb-12 pt-28 sm:px-6 lg:px-8">
+      <section className="mx-auto max-w-7xl px-4 pb-12 pt-64 sm:px-6 lg:px-8">
         <Card className="grid overflow-hidden md:grid-cols-[0.7fr_0.3fr]">
           <div className="p-6 sm:p-8">
             <Badge variant="success">Limited-time offer</Badge>

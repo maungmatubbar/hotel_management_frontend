@@ -18,7 +18,7 @@ type HotelCardProps = {
 export function HotelCard({ hotel }: HotelCardProps) {
   return (
     <Link
-      href={`/hotel/${hotel.slug}`}
+      href={`/hotel/${hotel.slug}/booking`}
       className="group block transition hover:-translate-y-1"
     >
       <Card className="overflow-hidden transition group-hover:shadow-xl">
@@ -64,7 +64,7 @@ export function HotelCard({ hotel }: HotelCardProps) {
                 {hotel.price}
               </p>
               <span className="mt-3 inline-flex rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition group-hover:bg-slate-800 dark:bg-slate-50 dark:text-slate-950">
-                See availability
+                Book now
               </span>
             </div>
           </div>

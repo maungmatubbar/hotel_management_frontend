@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 
 export function BookingForm() {
   return (
-    <Card className="p-6">
+    <Card id="payment" className="scroll-mt-24 p-6">
     <form className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>

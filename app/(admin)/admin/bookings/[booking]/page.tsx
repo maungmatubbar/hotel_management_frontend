@@ -1,16 +1,58 @@
 "use client";
 
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, CreditCard, Hash, Mail, MapPin, Phone, ReceiptText, UserRound } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Banknote,
+  BedDouble,
+  CalendarDays,
+  CircleCheck,
+  Clock3,
+  CreditCard,
+  DoorOpen,
+  Download,
+  FileCheck2,
+  FileText,
+  Hash,
+  Mail,
+  MapPin,
+  Phone,
+  ShieldCheck,
+  Sparkles,
+  UserRound,
+  WalletCards,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { getTenantBooking, type BookingDataResponse } from "@/lib/tenant-api";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  getTenantBooking,
+  payBookingInvoice,
+  updateBookingStatus,
+  type BookingDataResponse,
+  type BookingPaymentResponse,
+  type BookingStatus,
+} from "@/lib/tenant-api";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 import { useTenantStore } from "@/store/tenant-store";
+
+const bookingStatusOptions: { value: BookingStatus; label: string }[] = [
+  { value: "pending", label: "Pending" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "check_in", label: "Checked in" },
+  { value: "check_out", label: "Checked out" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+function formatBookingStatus(status: string | null | undefined) {
+  return bookingStatusOptions.find((option) => option.value === status)?.label ?? status ?? "Pending";
+}
 
 function formatTk(amount: number) {
   return `Tk ${amount.toLocaleString("en-BD")}`;
@@ -21,7 +63,7 @@ function parseAmount(amount: string | number | undefined) {
     return amount;
   }
 
-  return Number((amount ?? "").replace(/[^\d]/g, "")) || 0;
+  return Number((amount ?? "").replace(/[^\d.-]/g, "")) || 0;
 }
 
 function getBookingDate(booking: BookingDataResponse, key: "check_in" | "check_out") {
@@ -56,21 +98,133 @@ function formatMoney(amount: string | number | undefined) {
   return formatTk(parseAmount(amount));
 }
 
+function getInvoiceDueAmount(booking: BookingDataResponse) {
+  const dueAmount = parseAmount(booking.invoice?.amount_due);
+
+  if (dueAmount > 0) {
+    return dueAmount;
+  }
+
+  return parseAmount(booking.invoice?.total_amount ?? booking.total ?? booking.total_price);
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "Not set";
+  }
+
+  const normalizedValue = value.includes(" ") ? value.replace(" ", "T") : value;
+  const date = new Date(normalizedValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-BD", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatPaymentType(type: string | null | undefined) {
+  if (!type) {
+    return "Payment";
+  }
+
+  return type
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatPaymentMethod(method: string | null | undefined) {
+  return formatPaymentType(method);
+}
+
+async function downloadFile(url: string, filename: string, token: string | null) {
+  if (!token) {
+    throw new Error("Missing auth token.");
+  }
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/pdf",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Download failed.");
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = objectUrl;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
 function getStayDateRange(booking: BookingDataResponse) {
   return [getBookingDate(booking, "check_in"), getBookingDate(booking, "check_out")]
     .filter(Boolean)
     .join(" - ");
 }
 
-function DetailItem({ label, value }: { label: string; value: string | number | null | undefined }) {
+function getStayNights(booking: BookingDataResponse) {
+  const checkIn = getBookingDate(booking, "check_in");
+  const checkOut = getBookingDate(booking, "check_out");
+  const checkInDate = new Date(checkIn);
+  const checkOutDate = new Date(checkOut);
+
+  if (!checkIn || !checkOut || Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime())) {
+    return "Flexible stay";
+  }
+
+  const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / 86_400_000);
+
+  if (nights <= 0) {
+    return "Same day stay";
+  }
+
+  return `${nights} night${nights > 1 ? "s" : ""}`;
+}
+
+function getGuestInitials(name: string | null | undefined) {
+  return (name ?? "Guest")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+function getPaymentProgress(booking: BookingDataResponse) {
+  const total = parseAmount(booking.invoice?.total_amount ?? booking.total ?? booking.total_price);
+  const paid = parseAmount(booking.invoice?.amount_paid);
+
+  if (total <= 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.round((paid / total) * 100));
+}
+
+function PlainDetail({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-950/60 dark:shadow-black/20">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-        {label}
-      </p>
-      <p className="mt-2 wrap-break-word text-sm font-semibold text-slate-950 dark:text-slate-50">
+    <div className="flex flex-col gap-1 border-b border-slate-100 py-3 last:border-b-0 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <span className="text-sm text-slate-500 dark:text-slate-400">{label}</span>
+      <span className="wrap-break-word text-sm font-semibold text-slate-950 dark:text-slate-50 sm:max-w-[65%] sm:text-right">
         {value || "Not set"}
-      </p>
+      </span>
     </div>
   );
 }
@@ -85,8 +239,8 @@ function SummaryItem({
   value: string | number | null | undefined;
 }) {
   return (
-    <div className="flex gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 text-white backdrop-blur">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/15">
+    <div className="group flex gap-3 rounded-3xl border border-white/15 bg-white/10 p-4 text-white shadow-lg shadow-black/10 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white/15">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/10">
         <Icon className="h-5 w-5" />
       </span>
       <div>
@@ -97,20 +251,129 @@ function SummaryItem({
   );
 }
 
-function InvoiceRow({ label, value }: { label: string; value: string | number | null | undefined }) {
+function HeroMetric({
+  icon: Icon,
+  label,
+  value,
+  helper,
+}: {
+  icon: typeof UserRound;
+  label: string;
+  value: string | number | null | undefined;
+  helper?: string;
+}) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-3 last:border-b-0 dark:border-slate-800">
-      <span className="text-sm text-slate-500 dark:text-slate-400">{label}</span>
-      <strong className="text-right text-sm text-slate-950 dark:text-slate-50">{value || "Not set"}</strong>
+    <div className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/20">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-200">
+          <Icon className="h-5 w-5" />
+        </span>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{label}</p>
+          <p className="mt-1 text-base font-bold text-slate-950 dark:text-slate-50">{value || "Not set"}</p>
+          {helper ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{helper}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BookingJourney({ status }: { status: BookingStatus }) {
+  const currentIndex = Math.max(
+    bookingStatusOptions.findIndex((option) => option.value === status),
+    0
+  );
+  const visibleStatuses = bookingStatusOptions.filter((option) => option.value !== "cancelled");
+
+  return (
+    <div className="grid gap-3 md:grid-cols-5">
+      {visibleStatuses.map((option, index) => {
+        const isComplete = currentIndex >= index && status !== "cancelled";
+        const isCurrent = status === option.value;
+
+        return (
+          <div
+            key={option.value}
+            className={cn(
+              "rounded-2xl border p-3 transition",
+              isComplete
+                ? "border-cyan-200 bg-cyan-50 text-cyan-900 dark:border-cyan-900 dark:bg-cyan-950/40 dark:text-cyan-100"
+                : "border-slate-200 bg-white text-slate-500 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-400",
+              isCurrent ? "ring-2 ring-cyan-400/40" : ""
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold",
+                  isComplete ? "bg-cyan-600 text-white" : "bg-slate-100 text-slate-500 dark:bg-slate-800"
+                )}
+              >
+                {isComplete ? <CircleCheck className="h-4 w-4" /> : index + 1}
+              </span>
+              <p className="text-xs font-semibold">{option.label}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PaymentItem({ payment, token }: { payment: BookingPaymentResponse; token: string | null }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-950/60 dark:shadow-black/20">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-slate-950 dark:text-slate-50">{formatMoney(payment.amount)}</p>
+          <div className="mt-1.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+            <p>Method: {formatPaymentMethod(payment.method)}</p>
+            <p>Paid at: {formatDateTime(payment.paid_at)}</p>
+          </div>
+        </div>
+        <Badge variant="success">{formatPaymentType(payment.type)}</Badge>
+      </div>
+      {payment.reference ? (
+        <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+          Reference: {payment.reference}
+        </p>
+      ) : null}
+      {payment.receipt ? (
+        <div className="mt-2 flex flex-col gap-2 rounded-xl bg-gray-50 px-3 py-2.5 text-xs text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <span className="text-[9px] font-semibold leading-5">
+            Receipt {payment.receipt.receipt_number} · Issued {formatDateTime(payment.receipt.issued_at)}
+          </span>
+          {payment.receipt.download_url ? (
+            <a
+              href={payment.receipt.download_url}
+              onClick={(event) => {
+                event.preventDefault();
+                void downloadFile(payment.receipt!.download_url, `${payment.receipt!.receipt_number}.pdf`, token);
+              }}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-7 w-fit shrink-0 rounded-lg bg-white px-2 text-xs text-slate-700 dark:bg-slate-950 dark:text-slate-200")}
+            >
+              <Download className="h-3 w-3" />
+              Download receipt
+            </a>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export default function AdminBookingDetailPage() {
   const params = useParams<{ booking: string }>();
+  const queryClient = useQueryClient();
   const token = useAuthStore((state) => state.token);
   const tenant = useTenantStore((state) => state.tenant);
   const bookingId = params.booking;
+  const [paymentAmount, setPaymentAmount] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paidAt, setPaidAt] = useState<string | null>(null);
+  const [bookingStatus, setBookingStatus] = useState<BookingStatus | null>(null);
+  const [formMessage, setFormMessage] = useState("");
 
   const { data: booking, isLoading, isError, error } = useQuery({
     queryKey: ["bookings", "detail", token, tenant.id, bookingId],
@@ -118,21 +381,98 @@ export default function AdminBookingDetailPage() {
     enabled: Boolean(token && tenant.id && bookingId),
   });
 
+  const defaultPaymentAmount = booking ? String(getInvoiceDueAmount(booking)) : "";
+  const hasInvoiceDue = booking ? parseAmount(booking.invoice?.amount_due) > 0 : false;
+  const downPaymentAmount = paymentAmount ?? defaultPaymentAmount;
+  const effectivePaidAt = paidAt ?? new Date().toISOString().slice(0, 10);
+  const effectiveBookingStatus: BookingStatus = (bookingStatus ?? booking?.status ?? "confirmed") as BookingStatus;
+
+  const paymentMutation = useMutation({
+    mutationFn: ({ amount, type }: { amount: string; type: "full_payment" | "down_payment" }) => {
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const paymentPayload = {
+        amount,
+        method: paymentMethod,
+        reference: paymentReference.trim() || undefined,
+        paid_at: effectivePaidAt,
+        type,
+      };
+
+      return payBookingInvoice(token, tenant.id, bookingId, paymentPayload);
+    },
+    onSuccess: (_updatedBooking, variables) => {
+      setFormMessage(
+        variables.type === "down_payment"
+          ? "Down payment saved and receipt created."
+          : "Invoice payment saved and receipt created."
+      );
+      setPaymentAmount(null);
+      setPaymentReference("");
+      void queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: () => {
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      return updateBookingStatus(token, tenant.id, bookingId, { status: effectiveBookingStatus });
+    },
+    onSuccess: () => {
+      setFormMessage("Booking status updated.");
+      void queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    },
+  });
+
+  function handlePaymentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const paymentType =
+      submitter?.value === "down_payment" ? "down_payment" : "full_payment";
+    const amount = paymentType === "down_payment" ? downPaymentAmount : defaultPaymentAmount;
+
+    setFormMessage("");
+    paymentMutation.mutate({ amount, type: paymentType });
+  }
+
+  function handleStatusSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormMessage("");
+    statusMutation.mutate();
+  }
+
+  const paymentError =
+    paymentMutation.error instanceof Error ? paymentMutation.error.message : "Payment update failed.";
+  const statusError =
+    statusMutation.error instanceof Error ? statusMutation.error.message : "Status update failed.";
+  const paymentProgress = booking ? getPaymentProgress(booking) : 0;
+  const stayNights = booking ? getStayNights(booking) : "Flexible stay";
+  const guestInitials = booking ? getGuestInitials(booking.guest_name) : "G";
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <Badge variant="success">Booking details</Badge>
-          <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">
-            View booking
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-            Guest contact, room number, stay dates, and invoice summary.
-          </p>
+      <div className="relative overflow-hidden rounded-4xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/70 dark:border-slate-800 dark:bg-slate-900/80 dark:shadow-black/20 sm:p-6">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-48 w-48 rounded-full bg-cyan-200/50 blur-3xl dark:bg-cyan-900/30" />
+        <div className="pointer-events-none absolute -bottom-24 left-16 h-44 w-44 rounded-full bg-emerald-200/50 blur-3xl dark:bg-emerald-900/20" />
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <Badge variant="success">Booking command center</Badge>
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950 dark:text-slate-50 sm:text-3xl">
+              Manage guest stay, documents, and payment in one place
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+              A clean hotel front-desk view for room assignment, guest verification, invoice collection, and receipt history.
+            </p>
+          </div>
+          <Link href="/admin/bookings" className={cn(buttonVariants({ variant: "outline" }), "rounded-full")}>
+            Back to bookings
+          </Link>
         </div>
-        <Link href="/admin/bookings" className={cn(buttonVariants({ variant: "outline" }), "rounded-xl")}>
-          Back to bookings
-        </Link>
       </div>
 
       {isLoading ? (
@@ -147,144 +487,453 @@ export default function AdminBookingDetailPage() {
 
       {booking ? (
         <div className="space-y-6">
-          <Card className="overflow-hidden border-0 bg-linear-to-br from-slate-950 via-slate-900 to-cyan-950 p-0 text-white shadow-xl shadow-slate-900/20">
-            <div className="p-5 sm:p-6">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="success">{booking.invoice?.status ?? booking.status ?? "Pending"}</Badge>
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-cyan-100">
-                      Booking #{booking.id}
-                    </span>
-                    {booking.invoice?.invoice_number ? (
+          <Card className="overflow-hidden border-0 bg-linear-to-br from-slate-950 via-slate-900 to-cyan-950 p-0 text-white shadow-2xl shadow-slate-900/20">
+            <div className="relative p-5 sm:p-6 lg:p-8">
+              <div className="pointer-events-none absolute -right-16 top-10 h-52 w-52 rounded-full bg-cyan-400/20 blur-3xl" />
+              <div className="pointer-events-none absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-emerald-300/10 blur-3xl" />
+              <div className="relative flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+                  <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.75rem] bg-white/15 text-2xl font-black ring-1 ring-white/20 backdrop-blur">
+                    {guestInitials}
+                  </span>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="inverted">
+                        {formatBookingStatus(booking.invoice?.status ?? booking.status)}
+                      </Badge>
                       <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-cyan-100">
-                        {booking.invoice.invoice_number}
+                        {booking.booking_number ?? `Booking #${booking.id}`}
                       </span>
-                    ) : null}
+                      {booking.invoice?.invoice_number ? (
+                        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                          {booking.invoice.invoice_number}
+                        </span>
+                      ) : null}
+                    </div>
+                    <h3 className="mt-5 text-3xl font-semibold tracking-tight sm:text-4xl">
+                      {booking.guest_name ?? "Guest"}
+                    </h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                      {booking.room ?? "Room not set"}{" "}
+                      {booking.assigned_room_number ? `· Room ${booking.assigned_room_number}` : ""}
+                    </p>
                   </div>
-                  <h3 className="mt-5 text-3xl font-semibold tracking-tight sm:text-4xl">
-                    {booking.guest_name ?? "Guest"}
-                  </h3>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                    {booking.room ?? "Room not set"}{" "}
-                    {booking.assigned_room_number ? `· Room ${booking.assigned_room_number}` : ""}
-                  </p>
                 </div>
-                <div className="rounded-3xl border border-white/15 bg-white/10 p-5 text-right backdrop-blur">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100">Total amount</p>
-                  <p className="mt-2 text-3xl font-bold">{formatBookingTotal(booking)}</p>
-                  <p className="mt-1 text-sm text-slate-300">
-                    Due {formatMoney(booking.invoice?.amount_due) ?? formatBookingTotal(booking)}
+                <div className="rounded-[1.75rem] border border-white/15 bg-white/10 p-5 backdrop-blur lg:min-w-72">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100">Total amount</p>
+                      <p className="mt-2 text-3xl font-bold">{formatBookingTotal(booking)}</p>
+                    </div>
+                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">
+                      <WalletCards className="h-6 w-6" />
+                    </span>
+                  </div>
+                  <div className="mt-4 h-2 rounded-full bg-white/15">
+                    <div className="h-2 rounded-full bg-emerald-300" style={{ width: `${paymentProgress}%` }} />
+                  </div>
+                  <p className="mt-2 text-sm text-slate-300">
+                    {paymentProgress}% paid · Due {formatMoney(booking.invoice?.amount_due) ?? formatBookingTotal(booking)}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="relative mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <SummaryItem icon={Phone} label="Phone" value={booking.guest_phone ?? booking.phone_number} />
                 <SummaryItem icon={Mail} label="Email" value={booking.guest_email ?? booking.email} />
                 <SummaryItem icon={CalendarDays} label="Stay" value={getStayDateRange(booking)} />
-                <SummaryItem icon={Hash} label="Room number" value={booking.assigned_room_number} />
+                <SummaryItem icon={DoorOpen} label="Room number" value={booking.assigned_room_number} />
               </div>
             </div>
           </Card>
 
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <HeroMetric icon={BedDouble} label="Room type" value={booking.room} helper={`${booking.room_quantity || 1} room booked`} />
+            <HeroMetric icon={Clock3} label="Length of stay" value={stayNights} helper={getStayDateRange(booking) || "Date not set"} />
+            <HeroMetric icon={ShieldCheck} label="Guest ID" value={booking.nid_number || "Pending"} helper={booking.nid_image_url ? "NID image attached" : "Upload still missing"} />
+            <HeroMetric icon={Sparkles} label="Promo" value={booking.promo_code || "No promo"} helper={`Discount ${formatMoney(booking.invoice?.discount ?? booking.discount) ?? formatTk(0)}`} />
+          </div>
+
           <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
             <div className="space-y-6">
-              <Card className="p-5 sm:p-6">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-200">
-                    <UserRound className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-50">Guest information</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Contact and identity details</p>
+              <Card className="overflow-hidden border-slate-100 bg-linear-to-br from-white via-slate-50 to-cyan-50 p-5 shadow-sm dark:border-slate-800 dark:from-slate-900 dark:via-slate-950 dark:to-cyan-950/30 sm:p-6">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-white dark:bg-slate-50 dark:text-slate-950">
+                      <FileCheck2 className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-50">
+                        Documents & booking status
+                      </h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        Verify guest identity and update the booking stage.
+                      </p>
+                    </div>
                   </div>
+                  <Badge variant={effectiveBookingStatus === "cancelled" ? "warning" : "success"}>
+                    {formatBookingStatus(effectiveBookingStatus)}
+                  </Badge>
                 </div>
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <DetailItem label="Guest name" value={booking.guest_name} />
-                  <DetailItem label="Phone" value={booking.guest_phone ?? booking.phone_number} />
-                  <DetailItem label="Email" value={booking.guest_email ?? booking.email} />
-                  <DetailItem label="Address" value={booking.guest_address ?? booking.address} />
-                  <DetailItem label="NID number" value={booking.nid_number} />
-                  <DetailItem label="Promo code" value={booking.promo_code} />
-                </div>
-              </Card>
 
-              <Card className="p-5 sm:p-6">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-200">
-                    <MapPin className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-50">Stay details</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Room, dates, and assignment</p>
-                  </div>
+                <div className="mt-5">
+                  <BookingJourney status={effectiveBookingStatus} />
                 </div>
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <DetailItem label="Room" value={booking.room} />
-                  <DetailItem label="Room number" value={booking.assigned_room_number} />
-                  <DetailItem label="Room quantity" value={booking.room_quantity} />
-                  <DetailItem label="Dates" value={getStayDateRange(booking)} />
-                </div>
-              </Card>
 
-              <Card className="overflow-hidden p-5 sm:p-6">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                    <ReceiptText className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-50">NID document</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Uploaded guest identity image</p>
+                <div className="mt-5 grid gap-5 lg:grid-cols-[220px_1fr]">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/20">
+                    {booking.nid_image_url ? (
+                      <a
+                        href={booking.nid_image_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block overflow-hidden rounded-2xl bg-slate-100 dark:bg-slate-900"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={booking.nid_image_url}
+                          alt="Guest NID"
+                          className="h-40 w-full object-cover transition hover:scale-[1.02]"
+                        />
+                      </a>
+                    ) : (
+                      <div className="flex h-40 flex-col items-center justify-center rounded-2xl bg-slate-50 px-4 text-center text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <ShieldCheck className="mb-2 h-8 w-8 text-slate-300 dark:text-slate-700" />
+                        No NID image uploaded.
+                      </div>
+                    )}
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                        NID number
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
+                        {booking.nid_number || "Not set"}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                {booking.nid_image_url ? (
-                  <a
-                    href={booking.nid_image_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-5 block overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-950"
+
+                  <form
+                    className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/20 sm:p-5"
+                    onSubmit={handleStatusSubmit}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={booking.nid_image_url} alt="Guest NID" className="h-72 w-full object-cover transition hover:scale-[1.01]" />
-                  </a>
-                ) : (
-                  <p className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">
-                    No NID image uploaded.
-                  </p>
-                )}
+                    <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                      <div>
+                        <Label htmlFor="booking-status">Booking status</Label>
+                        <select
+                          id="booking-status"
+                          className="mt-2 flex h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50 dark:focus:border-slate-300"
+                          value={effectiveBookingStatus}
+                          onChange={(event) => setBookingStatus(event.target.value as BookingStatus)}
+                        >
+                          {bookingStatusOptions.map((status) => (
+                            <option key={status.value} value={status.value}>
+                              {status.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <Button type="submit" className="md:min-w-40" disabled={statusMutation.isPending}>
+                        {statusMutation.isPending ? "Updating..." : "Update status"}
+                      </Button>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl bg-cyan-50 p-3 dark:bg-cyan-950/40">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-700 dark:text-cyan-200">
+                          Room
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
+                          {booking.assigned_room_number || "Not set"}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-amber-50 p-3 dark:bg-amber-950/40">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700 dark:text-amber-200">
+                          Stay
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
+                          {getStayDateRange(booking) || "Not set"}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-emerald-50 p-3 dark:bg-emerald-950/40">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-200">
+                          Invoice
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
+                          {booking.invoice?.status ?? "Pending"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
+                      Front desk note: confirm the guest document before check-in, then move the booking through the stay journey.
+                    </div>
+
+                    {formMessage ? (
+                      <p className="mt-4 rounded-2xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">
+                        {formMessage}
+                      </p>
+                    ) : null}
+                    {statusMutation.isError ? (
+                      <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                        {statusError}
+                      </p>
+                    ) : null}
+                  </form>
+                </div>
+              </Card>
+
+              <Card className="overflow-hidden p-0">
+                <div className="border-b border-slate-200 bg-linear-to-r from-slate-50 via-white to-cyan-50 p-5 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-cyan-950/30 sm:p-6">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-200">
+                      <UserRound className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-50">Guest information</h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        Contact, stay, and booking reference details.
+                      </p>
+                    </div>
+                    </div>
+                    <span className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-800">
+                      {stayNights}
+                    </span>
+                  </div>
+                </div>
+                <div className="grid gap-0 divide-y divide-slate-200 dark:divide-slate-800 md:grid-cols-2 xl:grid-cols-3 xl:divide-x xl:divide-y-0">
+                  <div className="p-5 sm:p-6">
+                    <div className="flex items-center gap-2">
+                      <UserRound className="h-4 w-4 text-cyan-600 dark:text-cyan-300" />
+                      <h4 className="font-semibold text-slate-950 dark:text-slate-50">Contact details</h4>
+                    </div>
+                    <div className="mt-3">
+                      <PlainDetail label="Guest name" value={booking.guest_name} />
+                      <PlainDetail label="Phone" value={booking.guest_phone ?? booking.phone_number} />
+                      <PlainDetail label="Email" value={booking.guest_email ?? booking.email} />
+                      <PlainDetail label="Address" value={booking.guest_address ?? booking.address} />
+                    </div>
+                  </div>
+                  <div className="p-5 sm:p-6">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                      <h4 className="font-semibold text-slate-950 dark:text-slate-50">Stay details</h4>
+                    </div>
+                    <div className="mt-3">
+                      <PlainDetail label="Room" value={booking.room} />
+                      <PlainDetail label="Room number" value={booking.assigned_room_number} />
+                      <PlainDetail label="Room quantity" value={booking.room_quantity} />
+                      <PlainDetail label="Dates" value={getStayDateRange(booking)} />
+                      <PlainDetail label="Promo code" value={booking.promo_code} />
+                    </div>
+                  </div>
+                  <div className="p-5 sm:p-6">
+                    <div className="flex items-center gap-2">
+                      <Hash className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+                      <h4 className="font-semibold text-slate-950 dark:text-slate-50">Invoice summary</h4>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      {booking.invoice?.invoice_number ?? "No invoice number"}
+                    </p>
+                    <div className="mt-3">
+                      <PlainDetail label="Subtotal" value={formatMoney(booking.invoice?.subtotal)} />
+                      <PlainDetail label="Booking number" value={booking.booking_number} />
+                      <PlainDetail label="Discount" value={formatMoney(booking.invoice?.discount ?? booking.discount)} />
+                      <PlainDetail label="Amount paid" value={formatMoney(booking.invoice?.amount_paid)} />
+                      <PlainDetail label="Amount due" value={formatMoney(booking.invoice?.amount_due)} />
+                      <PlainDetail label="Total" value={formatBookingTotal(booking)} />
+                      <PlainDetail label="Invoice status" value={booking.invoice?.status ?? booking.status} />
+                    </div>
+                  </div>
+                </div>
               </Card>
             </div>
 
             <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+              <Card className="overflow-hidden border-0 bg-linear-to-br from-emerald-600 via-cyan-700 to-slate-950 p-0 text-white shadow-xl shadow-emerald-900/20">
+                <div className="p-5 sm:p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <Badge variant="inverted">Payment desk</Badge>
+                      <h3 className="mt-4 text-xl font-semibold">Pay invoice or down payment</h3>
+                      <p className="mt-2 text-sm leading-6 text-emerald-50/90">
+                        Collect full or partial payment, generate receipt, and keep the booking lifecycle updated.
+                      </p>
+                    </div>
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/15">
+                      <CreditCard className="h-6 w-6" />
+                    </span>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">
+                        Paid
+                      </p>
+                      <p className="mt-2 text-lg font-bold">{formatMoney(booking.invoice?.amount_paid) ?? formatTk(0)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-100">
+                        Due
+                      </p>
+                      <p className="mt-2 text-lg font-bold">{formatMoney(booking.invoice?.amount_due) ?? formatBookingTotal(booking)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 rounded-2xl bg-white/10 p-3 backdrop-blur">
+                    <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100">
+                      <span>Collection progress</span>
+                      <span>{paymentProgress}%</span>
+                    </div>
+                    <div className="mt-2 h-2 rounded-full bg-white/15">
+                      <div className="h-2 rounded-full bg-white" style={{ width: `${paymentProgress}%` }} />
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
               <Card className="p-5 sm:p-6">
                 <div className="flex items-center gap-3">
                   <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">
-                    <CreditCard className="h-5 w-5" />
+                    <Banknote className="h-5 w-5" />
                   </span>
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-50">Invoice summary</h3>
+                    <h3 className="text-lg font-semibold text-slate-950 dark:text-slate-50">Record payment</h3>
                     <p className="text-sm text-slate-500 dark:text-slate-400">
-                      {booking.invoice?.invoice_number ?? "No invoice number"}
+                      Full payment or down payment will create a receipt.
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-5 rounded-3xl border border-slate-200 p-4 dark:border-slate-800">
-                  <InvoiceRow label="Subtotal" value={formatMoney(booking.invoice?.subtotal)} />
-                  <InvoiceRow label="Discount" value={formatMoney(booking.invoice?.discount ?? booking.discount)} />
-                  <InvoiceRow label="Amount paid" value={formatMoney(booking.invoice?.amount_paid)} />
-                  <InvoiceRow label="Amount due" value={formatMoney(booking.invoice?.amount_due)} />
-                  <div className="mt-4 flex items-center justify-between gap-4 rounded-2xl bg-cyan-50 px-4 py-3 dark:bg-cyan-950/40">
-                    <span className="text-sm font-semibold text-cyan-700 dark:text-cyan-200">Total</span>
-                    <strong className="text-lg text-slate-950 dark:text-slate-50">{formatBookingTotal(booking)}</strong>
+                <form className="mt-5 space-y-4" onSubmit={handlePaymentSubmit}>
+                  <div>
+                    <Label htmlFor="payment-amount">Down payment amount</Label>
+                    <Input
+                      id="payment-amount"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      className="mt-2"
+                      value={downPaymentAmount}
+                      onChange={(event) => setPaymentAmount(event.target.value)}
+                      disabled={!hasInvoiceDue}
+                      required
+                    />
                   </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="payment-method">Method</Label>
+                      <select
+                        id="payment-method"
+                        className="mt-2 flex h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50 dark:focus:border-slate-300"
+                        value={paymentMethod}
+                        onChange={(event) => setPaymentMethod(event.target.value)}
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="bank_transfer">Bank transfer</option>
+                        <option value="mobile_banking">Mobile banking</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label htmlFor="paid-at">Paid date</Label>
+                      <Input
+                        id="paid-at"
+                        type="date"
+                        className="mt-2"
+                        value={effectivePaidAt}
+                        onChange={(event) => setPaidAt(event.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="payment-reference">Reference / transaction ID</Label>
+                    <Input
+                      id="payment-reference"
+                      className="mt-2"
+                      placeholder="Optional"
+                      value={paymentReference}
+                      onChange={(event) => setPaymentReference(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Button
+                      type="submit"
+                      name="paymentType"
+                      value="full_payment"
+                      disabled={
+                        paymentMutation.isPending ||
+                        !defaultPaymentAmount ||
+                        parseAmount(defaultPaymentAmount) <= 0
+                      }
+                    >
+                      {paymentMutation.isPending ? "Saving payment..." : "Mark paid & create receipt"}
+                    </Button>
+                    <Button
+                      type="submit"
+                      name="paymentType"
+                      value="down_payment"
+                      variant="outline"
+                      disabled={
+                        paymentMutation.isPending ||
+                        !hasInvoiceDue ||
+                        !downPaymentAmount ||
+                        parseAmount(downPaymentAmount) <= 0
+                      }
+                    >
+                      {paymentMutation.isPending ? "Saving payment..." : "Save down payment"}
+                    </Button>
+                  </div>
+                </form>
+                {paymentMutation.isError ? (
+                  <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                    {paymentError}
+                  </p>
+                ) : null}
+              </Card>
+
+              <Card className="p-5 sm:p-6">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      <FileText className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-950 dark:text-slate-50">Receipt history</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Invoice payments and receipt numbers</p>
+                    </div>
+                  </div>
+                  {booking.invoice?.download_url ? (
+                    <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900">
+                      <span className="truncate text-xs font-semibold text-slate-950 dark:text-slate-50">
+                        {booking.invoice.invoice_number}
+                      </span>
+                      <a
+                        href={booking.invoice.download_url}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          void downloadFile(booking.invoice!.download_url, `${booking.invoice!.invoice_number}.pdf`, token);
+                        }}
+                        className={cn(buttonVariants({ size: "sm" }), "h-7 shrink-0 rounded-lg bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700")}
+                      >
+                        <Download className="h-3 w-3" />
+                        Invoice download
+                      </a>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="mt-5 grid gap-3">
-                  <DetailItem label="Invoice status" value={booking.invoice?.status ?? booking.status} />
-                  <DetailItem label="Issued at" value={booking.invoice?.issued_at} />
-                  <DetailItem label="Due at" value={booking.invoice?.due_at} />
+                <div className="mt-5 space-y-3">
+                  {booking.invoice?.payments?.length ? (
+                    booking.invoice.payments.map((payment) => (
+                      <PaymentItem key={payment.id} payment={payment} token={token} />
+                    ))
+                  ) : (
+                    <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                      No payments or receipts created yet.
+                    </p>
+                  )}
                 </div>
               </Card>
             </div>
