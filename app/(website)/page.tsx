@@ -197,7 +197,7 @@ export default function CustomerHomePage() {
   }
 
   return (
-    <main className="hotel-page-bg overflow-hidden text-slate-950 dark:text-slate-50">
+    <main className="hotel-page-bg overflow-x-hidden text-slate-950 dark:text-slate-50">
       <Navbar />
       <section className="relative bg-slate-950 text-white">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.22),transparent_34%),radial-gradient(circle_at_84%_12%,rgba(245,158,11,0.18),transparent_28%),linear-gradient(135deg,rgba(15,23,42,0.98),rgba(15,23,42,0.82))]" />

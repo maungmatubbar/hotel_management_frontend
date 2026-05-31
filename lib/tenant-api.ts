@@ -133,6 +133,15 @@ export type BookingStatusPayload = {
   status: BookingStatus;
 };
 
+export type BookingRoomAssignmentPayload = {
+  room_id: string | number;
+  assigned_room_number: string;
+};
+
+export type BookingNidImagePayload = {
+  nid_image_url: string;
+};
+
 /** API booking shape from generated types, plus optional legacy list/detail fields. */
 export type BookingDataResponse = GeneratedBookingDataResponse & {
   readonly id: string | number;
@@ -534,6 +543,42 @@ export async function updateBookingStatus(
 ): Promise<BookingDataResponse> {
   const response = await fetch(
     `${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/bookings/${encodeURIComponent(String(booking))}/status`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(token),
+      body: JSON.stringify(payload),
+    }
+  );
+
+  return parseApiResponse<BookingDataResponse>(response);
+}
+
+export async function assignBookingRoom(
+  token: string,
+  tenant: string,
+  booking: string | number,
+  payload: BookingRoomAssignmentPayload
+): Promise<BookingDataResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/bookings/${encodeURIComponent(String(booking))}/assign-room`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(token),
+      body: JSON.stringify(payload),
+    }
+  );
+
+  return parseApiResponse<BookingDataResponse>(response);
+}
+
+export async function updateBookingNidImage(
+  token: string,
+  tenant: string,
+  booking: string | number,
+  payload: BookingNidImagePayload
+): Promise<BookingDataResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/bookings/${encodeURIComponent(String(booking))}/nid-image`,
     {
       method: "PATCH",
       headers: getAuthHeaders(token),

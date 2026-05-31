@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Banknote,
-  BedDouble,
   CalendarDays,
+  Camera,
   CircleCheck,
-  Clock3,
   CreditCard,
   DoorOpen,
   Download,
@@ -20,7 +19,7 @@ import {
   MapPin,
   Phone,
   ShieldCheck,
-  Sparkles,
+  Upload,
   UserRound,
   WalletCards,
 } from "lucide-react";
@@ -30,8 +29,11 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  assignBookingRoom,
   getTenantBooking,
   payBookingInvoice,
+  uploadTenantFile,
+  updateBookingNidImage,
   updateBookingStatus,
   type BookingDataResponse,
   type BookingPaymentResponse,
@@ -218,6 +220,12 @@ function getPaymentProgress(booking: BookingDataResponse) {
   return Math.min(100, Math.round((paid / total) * 100));
 }
 
+function normalizeRoomNumber(roomNumber: string | null | undefined) {
+  const trimmedRoomNumber = (roomNumber ?? "").trim();
+
+  return trimmedRoomNumber.toLowerCase() === "to be assigned" ? "" : trimmedRoomNumber;
+}
+
 function PlainDetail({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (
     <div className="flex flex-col gap-1 border-b border-slate-100 py-3 last:border-b-0 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -246,33 +254,6 @@ function SummaryItem({
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-100">{label}</p>
         <p className="mt-1 text-sm font-semibold">{value || "Not set"}</p>
-      </div>
-    </div>
-  );
-}
-
-function HeroMetric({
-  icon: Icon,
-  label,
-  value,
-  helper,
-}: {
-  icon: typeof UserRound;
-  label: string;
-  value: string | number | null | undefined;
-  helper?: string;
-}) {
-  return (
-    <div className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/20">
-      <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-200">
-          <Icon className="h-5 w-5" />
-        </span>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{label}</p>
-          <p className="mt-1 text-base font-bold text-slate-950 dark:text-slate-50">{value || "Not set"}</p>
-          {helper ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{helper}</p> : null}
-        </div>
       </div>
     </div>
   );
@@ -373,6 +354,10 @@ export default function AdminBookingDetailPage() {
   const [paymentReference, setPaymentReference] = useState("");
   const [paidAt, setPaidAt] = useState<string | null>(null);
   const [bookingStatus, setBookingStatus] = useState<BookingStatus | null>(null);
+  const [roomNumber, setRoomNumber] = useState<string | null>(null);
+  const [uploadedNidImageUrl, setUploadedNidImageUrl] = useState<string | null>(null);
+  const [nidImageFile, setNidImageFile] = useState<File | null>(null);
+  const [nidImageInputKey, setNidImageInputKey] = useState(0);
   const [formMessage, setFormMessage] = useState("");
 
   const { data: booking, isLoading, isError, error } = useQuery({
@@ -386,6 +371,20 @@ export default function AdminBookingDetailPage() {
   const downPaymentAmount = paymentAmount ?? defaultPaymentAmount;
   const effectivePaidAt = paidAt ?? new Date().toISOString().slice(0, 10);
   const effectiveBookingStatus: BookingStatus = (bookingStatus ?? booking?.status ?? "confirmed") as BookingStatus;
+  const effectiveRoomNumber = roomNumber ?? normalizeRoomNumber(booking?.assigned_room_number);
+  const selectedNidPreviewUrl = useMemo(
+    () => (nidImageFile ? URL.createObjectURL(nidImageFile) : ""),
+    [nidImageFile]
+  );
+  const currentNidPreviewUrl = selectedNidPreviewUrl || uploadedNidImageUrl || booking?.nid_image_url || "";
+
+  useEffect(() => {
+    return () => {
+      if (selectedNidPreviewUrl) {
+        URL.revokeObjectURL(selectedNidPreviewUrl);
+      }
+    };
+  }, [selectedNidPreviewUrl]);
 
   const paymentMutation = useMutation({
     mutationFn: ({ amount, type }: { amount: string; type: "full_payment" | "down_payment" }) => {
@@ -429,6 +428,58 @@ export default function AdminBookingDetailPage() {
     },
   });
 
+  const roomAssignmentMutation = useMutation({
+    mutationFn: (nextRoomNumber: string) => {
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      if (!booking?.room_id) {
+        throw new Error("This booking has no room type assigned.");
+      }
+
+      const assignedRoomNumber = nextRoomNumber.trim();
+      if (!assignedRoomNumber) {
+        throw new Error("Room number is required.");
+      }
+
+      return assignBookingRoom(token, tenant.id, bookingId, {
+        room_id: booking.room_id,
+        assigned_room_number: assignedRoomNumber,
+      });
+    },
+    onSuccess: (_updatedBooking, nextRoomNumber) => {
+      const trimmedRoomNumber = nextRoomNumber.trim();
+      setFormMessage("Room number assigned.");
+      setRoomNumber(trimmedRoomNumber);
+      void queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    },
+  });
+
+  const nidImageMutation = useMutation({
+    mutationFn: async (nextNidImageFile: File | null) => {
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      if (!nextNidImageFile) {
+        throw new Error("NID image is required.");
+      }
+
+      const uploadedFile = await uploadTenantFile(token, tenant.id, nextNidImageFile);
+      await updateBookingNidImage(token, tenant.id, bookingId, { nid_image_url: uploadedFile.url });
+
+      return uploadedFile.url;
+    },
+    onSuccess: (uploadedNidImageUrl) => {
+      setFormMessage("NID image updated.");
+      setUploadedNidImageUrl(uploadedNidImageUrl);
+      setNidImageFile(null);
+      setNidImageInputKey((currentKey) => currentKey + 1);
+      void queryClient.invalidateQueries({ queryKey: ["bookings"] });
+    },
+  });
+
   function handlePaymentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
@@ -446,10 +497,26 @@ export default function AdminBookingDetailPage() {
     statusMutation.mutate();
   }
 
+  function handleRoomAssignmentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormMessage("");
+    roomAssignmentMutation.mutate(effectiveRoomNumber);
+  }
+
+  function handleNidImageSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormMessage("");
+    nidImageMutation.mutate(nidImageFile);
+  }
+
   const paymentError =
     paymentMutation.error instanceof Error ? paymentMutation.error.message : "Payment update failed.";
   const statusError =
     statusMutation.error instanceof Error ? statusMutation.error.message : "Status update failed.";
+  const roomAssignmentError =
+    roomAssignmentMutation.error instanceof Error ? roomAssignmentMutation.error.message : "Room assignment failed.";
+  const nidImageError =
+    nidImageMutation.error instanceof Error ? nidImageMutation.error.message : "NID image upload failed.";
   const paymentProgress = booking ? getPaymentProgress(booking) : 0;
   const stayNights = booking ? getStayNights(booking) : "Flexible stay";
   const guestInitials = booking ? getGuestInitials(booking.guest_name) : "G";
@@ -515,7 +582,7 @@ export default function AdminBookingDetailPage() {
                     </h3>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
                       {booking.room ?? "Room not set"}{" "}
-                      {booking.assigned_room_number ? `· Room ${booking.assigned_room_number}` : ""}
+                      {effectiveRoomNumber ? `· Room ${effectiveRoomNumber}` : ""}
                     </p>
                   </div>
                 </div>
@@ -542,18 +609,10 @@ export default function AdminBookingDetailPage() {
                 <SummaryItem icon={Phone} label="Phone" value={booking.guest_phone ?? booking.phone_number} />
                 <SummaryItem icon={Mail} label="Email" value={booking.guest_email ?? booking.email} />
                 <SummaryItem icon={CalendarDays} label="Stay" value={getStayDateRange(booking)} />
-                <SummaryItem icon={DoorOpen} label="Room number" value={booking.assigned_room_number} />
+                <SummaryItem icon={DoorOpen} label="Room number" value={effectiveRoomNumber} />
               </div>
             </div>
           </Card>
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <HeroMetric icon={BedDouble} label="Room type" value={booking.room} helper={`${booking.room_quantity || 1} room booked`} />
-            <HeroMetric icon={Clock3} label="Length of stay" value={stayNights} helper={getStayDateRange(booking) || "Date not set"} />
-            <HeroMetric icon={ShieldCheck} label="Guest ID" value={booking.nid_number || "Pending"} helper={booking.nid_image_url ? "NID image attached" : "Upload still missing"} />
-            <HeroMetric icon={Sparkles} label="Promo" value={booking.promo_code || "No promo"} helper={`Discount ${formatMoney(booking.invoice?.discount ?? booking.discount) ?? formatTk(0)}`} />
-          </div>
-
           <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
             <div className="space-y-6">
               <Card className="overflow-hidden border-slate-100 bg-linear-to-br from-white via-slate-50 to-cyan-50 p-5 shadow-sm dark:border-slate-800 dark:from-slate-900 dark:via-slate-950 dark:to-cyan-950/30 sm:p-6">
@@ -580,103 +639,172 @@ export default function AdminBookingDetailPage() {
                   <BookingJourney status={effectiveBookingStatus} />
                 </div>
 
-                <div className="mt-5 grid gap-5 lg:grid-cols-[220px_1fr]">
-                  <div className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/20">
-                    {booking.nid_image_url ? (
-                      <a
-                        href={booking.nid_image_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block overflow-hidden rounded-2xl bg-slate-100 dark:bg-slate-900"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={booking.nid_image_url}
-                          alt="Guest NID"
-                          className="h-40 w-full object-cover transition hover:scale-[1.02]"
-                        />
-                      </a>
-                    ) : (
-                      <div className="flex h-40 flex-col items-center justify-center rounded-2xl bg-slate-50 px-4 text-center text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                        <ShieldCheck className="mb-2 h-8 w-8 text-slate-300 dark:text-slate-700" />
-                        No NID image uploaded.
+                <div className="mt-5 space-y-5">
+                  <div className="grid gap-4 xl:grid-cols-3">
+                    <form
+                      className="min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-950 dark:shadow-black/20"
+                      onSubmit={handleStatusSubmit}
+                    >
+                      <div className="border-b border-slate-200 bg-linear-to-br from-slate-50 to-white p-4 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm shadow-slate-950/20 dark:bg-slate-50 dark:text-slate-950">
+                            <FileCheck2 className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-semibold text-slate-950 dark:text-slate-50">
+                              Booking status
+                            </h4>
+                            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                              Move this booking through the stay journey.
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                    )}
-                    <div className="mt-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                        NID number
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
-                        {booking.nid_number || "Not set"}
-                      </p>
-                    </div>
+                      <div className="space-y-3 p-4">
+                        <div>
+                          <Label htmlFor="booking-status">Status</Label>
+                          <select
+                            id="booking-status"
+                            className="mt-2 flex h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50 dark:focus:border-slate-300"
+                            value={effectiveBookingStatus}
+                            onChange={(event) => setBookingStatus(event.target.value as BookingStatus)}
+                          >
+                            {bookingStatusOptions.map((status) => (
+                              <option key={status.value} value={status.value}>
+                                {status.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <Button type="submit" className="w-full" disabled={statusMutation.isPending}>
+                          {statusMutation.isPending ? "Updating..." : "Update status"}
+                        </Button>
+                      </div>
+                      {statusMutation.isError ? (
+                        <p className="mx-4 mb-4 rounded-2xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                          {statusError}
+                        </p>
+                      ) : null}
+                    </form>
+
+                    <form
+                      className="min-w-0 overflow-hidden rounded-3xl border border-cyan-100 bg-white shadow-sm shadow-cyan-100/60 dark:border-cyan-900/60 dark:bg-slate-950 dark:shadow-black/20"
+                      onSubmit={handleRoomAssignmentSubmit}
+                    >
+                      <div className="border-b border-cyan-100 bg-linear-to-br from-cyan-50 to-white p-4 dark:border-cyan-900/60 dark:from-cyan-950/30 dark:to-slate-950">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-600 text-white shadow-sm shadow-cyan-600/20">
+                            <DoorOpen className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-semibold text-slate-950 dark:text-slate-50">
+                              Room assignment
+                            </h4>
+                            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                              Set the physical room number for this stay.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                        <div className="min-w-0">
+                          <Label htmlFor="room-number">Room number</Label>
+                          <Input
+                            id="room-number"
+                            className="mt-2 bg-slate-50 font-semibold dark:bg-slate-900"
+                            placeholder="e.g. 302"
+                            value={effectiveRoomNumber}
+                            onChange={(event) => setRoomNumber(event.target.value)}
+                            required
+                          />
+                        </div>
+                        <Button type="submit" className="w-full md:w-auto" disabled={roomAssignmentMutation.isPending}>
+                          {roomAssignmentMutation.isPending ? "Assigning..." : "Assign room"}
+                        </Button>
+                      </div>
+                      {roomAssignmentMutation.isError ? (
+                        <p className="mx-4 mb-4 rounded-2xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                          {roomAssignmentError}
+                        </p>
+                      ) : null}
+                    </form>
+
+                    <form
+                      className="min-w-0 overflow-hidden rounded-3xl border border-emerald-100 bg-white shadow-sm shadow-emerald-100/60 dark:border-emerald-900/60 dark:bg-slate-950 dark:shadow-black/20"
+                      onSubmit={handleNidImageSubmit}
+                    >
+                      <div className="border-b border-emerald-100 bg-linear-to-br from-emerald-50 to-white p-4 dark:border-emerald-900/60 dark:from-emerald-950/30 dark:to-slate-950">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm shadow-emerald-600/20">
+                            <ShieldCheck className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-semibold text-slate-950 dark:text-slate-50">
+                              Guest document
+                            </h4>
+                            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                              Upload NID first, then save the uploaded URL.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-3 p-4">
+                        <div className="grid gap-3 md:grid-cols-[140px_minmax(0,1fr)] md:items-center">
+                          <div className="overflow-hidden rounded-2xl border border-dashed border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30">
+                            {currentNidPreviewUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={currentNidPreviewUrl}
+                                alt={selectedNidPreviewUrl ? "Selected NID preview" : "Guest NID preview"}
+                                className="h-32 w-full object-cover md:h-28"
+                              />
+                            ) : (
+                              <div className="flex h-32 flex-col items-center justify-center text-emerald-600 dark:text-emerald-300 md:h-28">
+                                <Camera className="h-6 w-6" />
+                                <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                                  Preview
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <Label htmlFor="nid-image">NID image</Label>
+                            <Input
+                              key={nidImageInputKey}
+                              id="nid-image"
+                              type="file"
+                              accept="image/*"
+                              className="mt-2 h-auto min-h-11 py-2 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-700 dark:file:bg-slate-800 dark:file:text-slate-200"
+                              onChange={(event) => setNidImageFile(event.target.files?.[0] ?? null)}
+                              required
+                            />
+                            <p className="mt-2 truncate text-xs text-slate-500 dark:text-slate-400">
+                              {nidImageFile ? nidImageFile.name : "Select JPG, PNG, or WebP image."}
+                            </p>
+                          </div>
+                        </div>
+                        <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:text-white dark:hover:bg-emerald-600" disabled={nidImageMutation.isPending || !nidImageFile}>
+                          <Upload className="h-4 w-4" />
+                          {nidImageMutation.isPending ? "Uploading..." : "Upload & save NID"}
+                        </Button>
+                      </div>
+                      {nidImageMutation.isError ? (
+                        <p className="mx-4 mb-4 rounded-2xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
+                          {nidImageError}
+                        </p>
+                      ) : null}
+                    </form>
                   </div>
 
-                  <form
-                    className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-950/70 dark:shadow-black/20 sm:p-5"
-                    onSubmit={handleStatusSubmit}
-                  >
-                    <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                      <div>
-                        <Label htmlFor="booking-status">Booking status</Label>
-                        <select
-                          id="booking-status"
-                          className="mt-2 flex h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-950 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50 dark:focus:border-slate-300"
-                          value={effectiveBookingStatus}
-                          onChange={(event) => setBookingStatus(event.target.value as BookingStatus)}
-                        >
-                          {bookingStatusOptions.map((status) => (
-                            <option key={status.value} value={status.value}>
-                              {status.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <Button type="submit" className="md:min-w-40" disabled={statusMutation.isPending}>
-                        {statusMutation.isPending ? "Updating..." : "Update status"}
-                      </Button>
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl bg-cyan-50 p-3 dark:bg-cyan-950/40">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-700 dark:text-cyan-200">
-                          Room
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
-                          {booking.assigned_room_number || "Not set"}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-amber-50 p-3 dark:bg-amber-950/40">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700 dark:text-amber-200">
-                          Stay
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
-                          {getStayDateRange(booking) || "Not set"}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-emerald-50 p-3 dark:bg-emerald-950/40">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-200">
-                          Invoice
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-50">
-                          {booking.invoice?.status ?? "Pending"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
-                      Front desk note: confirm the guest document before check-in, then move the booking through the stay journey.
-                    </div>
+                  <div className="rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
+                    Front desk note: confirm the guest document before check-in, then move the booking through the stay journey.
+                  </div>
 
-                    {formMessage ? (
-                      <p className="mt-4 rounded-2xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">
-                        {formMessage}
-                      </p>
-                    ) : null}
-                    {statusMutation.isError ? (
-                      <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-200">
-                        {statusError}
-                      </p>
-                    ) : null}
-                  </form>
+                  {formMessage ? (
+                    <p className="rounded-2xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">
+                      {formMessage}
+                    </p>
+                  ) : null}
                 </div>
               </Card>
 
@@ -719,7 +847,7 @@ export default function AdminBookingDetailPage() {
                     </div>
                     <div className="mt-3">
                       <PlainDetail label="Room" value={booking.room} />
-                      <PlainDetail label="Room number" value={booking.assigned_room_number} />
+                      <PlainDetail label="Room number" value={effectiveRoomNumber} />
                       <PlainDetail label="Room quantity" value={booking.room_quantity} />
                       <PlainDetail label="Dates" value={getStayDateRange(booking)} />
                       <PlainDetail label="Promo code" value={booking.promo_code} />
@@ -748,7 +876,7 @@ export default function AdminBookingDetailPage() {
             </div>
 
             <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
-              <Card className="overflow-hidden border-0 bg-linear-to-br from-emerald-600 via-cyan-700 to-slate-950 p-0 text-white shadow-xl shadow-emerald-900/20">
+              {/* <Card className="overflow-hidden border-0 bg-linear-to-br from-emerald-600 via-cyan-700 to-slate-950 p-0 text-white shadow-xl shadow-emerald-900/20">
                 <div className="p-5 sm:p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -787,7 +915,7 @@ export default function AdminBookingDetailPage() {
                     </div>
                   </div>
                 </div>
-              </Card>
+              </Card> */}
 
               <Card className="p-5 sm:p-6">
                 <div className="flex items-center gap-3">
@@ -857,11 +985,12 @@ export default function AdminBookingDetailPage() {
                     />
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3">
                     <Button
                       type="submit"
                       name="paymentType"
                       value="full_payment"
+                      className="h-auto min-h-11 w-full whitespace-normal px-4 py-2.5 text-center leading-5"
                       disabled={
                         paymentMutation.isPending ||
                         !defaultPaymentAmount ||
@@ -875,6 +1004,7 @@ export default function AdminBookingDetailPage() {
                       name="paymentType"
                       value="down_payment"
                       variant="outline"
+                      className="h-auto min-h-11 w-full whitespace-normal px-4 py-2.5 text-center leading-5"
                       disabled={
                         paymentMutation.isPending ||
                         !hasInvoiceDue ||
