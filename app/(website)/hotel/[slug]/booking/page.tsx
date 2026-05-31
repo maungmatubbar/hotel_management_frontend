@@ -24,7 +24,7 @@ export default async function BookingPage({ params, searchParams }: BookingPageP
   const invoiceId = bookingDetails?.invoice ?? bookingDetails?.invoice_id;
 
   return (
-    <main>
+    <main className="hotel-page-bg">
       <Navbar />
       <section className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[0.58fr_0.42fr] lg:px-8">
         <div>

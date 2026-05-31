@@ -2,17 +2,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, UserCircle } from "lucide-react";
 import type { UserDataResponse } from "@/generated/generated";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { useHydrated } from "@/lib/use-hydrated";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 import { useTenantStore } from "@/store/tenant-store";
+
+const publicNavLinks = [
+  { label: "Home", href: "/" },
+  { label: "Rooms", href: "/rooms" },
+  { label: "Services", href: "/services" },
+  { label: "About", href: "/about" },
+  { label: "Contact", href: "/contact" },
+];
 
 function getDashboardPath(user: UserDataResponse | null): string {
   const roleNames = user?.roles.map((role) => role.name.toLowerCase()) ?? [];
@@ -44,6 +51,7 @@ function getProfilePath(user: UserDataResponse | null): string {
 
 export function Navbar() {
   const router = useRouter();
+  const pathname = usePathname();
   const queryClient = useQueryClient();
   const hydrated = useHydrated();
   const tenant = useTenantStore((state) => state.tenant);
@@ -52,6 +60,7 @@ export function Navbar() {
   const logout = useAuthStore((state) => state.logout);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const isLoggedIn = hydrated && Boolean(token);
+  const isHomeActive = pathname === "/";
 
   function handleLogout() {
     setIsUserMenuOpen(false);
@@ -61,7 +70,12 @@ export function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur-xl dark:border-slate-800/70 dark:bg-slate-950/80">
+    <header
+      className={cn(
+        "z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl transition-shadow dark:border-slate-800/70 dark:bg-slate-950/85",
+        isHomeActive ? "sticky top-0 shadow-sm shadow-slate-950/5" : "relative"
+      )}
+    >
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-slate-950 to-cyan-700 text-xs font-bold text-white shadow-lg shadow-cyan-900/20">
@@ -73,10 +87,26 @@ export function Navbar() {
           </div>
         </Link>
 
+        <nav className="hidden items-center gap-1 md:flex">
+          {publicNavLinks.map((link) => {
+            const isActive = pathname === link.href;
+
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={cn(
+                  "rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white",
+                  isActive && "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
+                )}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
+        </nav>
+
         <div className="flex items-center gap-2">
-          <Badge className="hidden rounded-lg border border-slate-200 bg-white/70 dark:border-slate-800 dark:bg-slate-900/70 lg:inline-flex">
-            {tenant.name}
-          </Badge>
           <ThemeToggle />
           {isLoggedIn ? (
             <div className="relative">
@@ -136,6 +166,24 @@ export function Navbar() {
           )}
         </div>
       </div>
+      <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 sm:px-6 md:hidden">
+        {publicNavLinks.map((link) => {
+          const isActive = pathname === link.href;
+
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={cn(
+                "shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white",
+                isActive && "bg-slate-100 text-slate-950 dark:bg-slate-800 dark:text-white"
+              )}
+            >
+              {link.label}
+            </Link>
+          );
+        })}
+      </nav>
     </header>
   );
 }

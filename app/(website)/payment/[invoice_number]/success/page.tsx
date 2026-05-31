@@ -9,7 +9,6 @@ import {
   Clock3,
   Download,
   Loader2,
-  ReceiptText,
   ShieldCheck,
   Sparkles,
   XCircle,
@@ -52,7 +51,7 @@ export default function PaymentSuccessPage() {
   const isPaid = invoice ? isPublicInvoicePaid(invoice) : false;
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#dcfce7,transparent_34%),linear-gradient(135deg,#f8fafc_0%,#eef2ff_46%,#ecfeff_100%)]">
+    <main className="hotel-page-bg min-h-screen overflow-hidden">
       <Navbar />
       <section className="relative mx-auto flex min-h-[74vh] max-w-5xl items-center px-4 py-12 sm:px-6 lg:px-8">
         <div className="absolute left-8 top-10 h-28 w-28 rounded-full bg-emerald-300/30 blur-3xl" />
@@ -194,15 +193,6 @@ export default function PaymentSuccessPage() {
                 <ArrowLeft className="h-4 w-4" />
                 Back to home
               </Link>
-              {invoice?.invoice_number ? (
-                <Link
-                  href={`/invoice/${encodeURIComponent(invoice.invoice_number)}`}
-                  className={cn(buttonVariants({ variant: "secondary" }), "flex-1")}
-                >
-                  <ReceiptText className="h-4 w-4" />
-                  View invoice
-                </Link>
-              ) : null}
               {invoice?.download_url ? (
                 <a
                   href={invoice.download_url}

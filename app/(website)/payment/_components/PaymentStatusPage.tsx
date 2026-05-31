@@ -62,7 +62,7 @@ export function PaymentStatusPage({
   const styles = toneStyles[tone];
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#dbeafe,transparent_34%),linear-gradient(135deg,#f8fafc_0%,#eef2ff_46%,#f0fdfa_100%)]">
+    <main className="hotel-page-bg min-h-screen overflow-hidden">
       <Navbar />
       <section className="relative mx-auto flex min-h-[74vh] max-w-5xl items-center px-4 py-12 sm:px-6 lg:px-8">
         <div className={cn("absolute left-8 top-10 h-32 w-32 rounded-full blur-3xl", styles.glow)} />

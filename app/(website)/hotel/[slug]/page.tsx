@@ -13,7 +13,7 @@ export default async function HotelDetailsPage({ params }: HotelDetailsPageProps
   const hotel = hotels.find((item) => item.slug === slug) ?? hotels[0];
 
   return (
-    <main>
+    <main className="hotel-page-bg">
       <Navbar />
       <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="overflow-hidden rounded-2xl bg-slate-950 text-white shadow-2xl shadow-slate-200">

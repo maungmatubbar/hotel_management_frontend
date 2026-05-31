@@ -5,9 +5,9 @@ const footerGroups = [
   {
     title: "Explore",
     links: [
-      { label: "Hotels", href: "/" },
-      { label: "Customer portal", href: "/customer/dashboard" },
-      { label: "Deals", href: "/#hotels" },
+      { label: "Home", href: "/" },
+      { label: "Rooms", href: "/rooms" },
+      { label: "Services", href: "/services" },
     ],
   },
   {
@@ -21,9 +21,9 @@ const footerGroups = [
   {
     title: "Support",
     links: [
-      { label: "Help center", href: "/" },
+      { label: "About", href: "/about" },
+      { label: "Contact", href: "/contact" },
       { label: "Terms", href: "/" },
-      { label: "Privacy", href: "/" },
     ],
   },
 ];
