@@ -88,6 +88,33 @@ export type BookingPayload = {
   check_out: string;
 };
 
+export type PublicBookingPayload = {
+  customer_name: string;
+  phone_number: string;
+  email?: string;
+  address: string;
+  guest_name: string;
+  guest_phone: string;
+  guest_email?: string;
+  guest_address: string;
+  guests: number;
+  room_id: string | number;
+  room_quantity: number;
+  check_in: string;
+  check_out: string;
+  payment_option: "pay_now" | "pay_later";
+  stay_nights: number;
+  total_amount: number;
+};
+
+export type PublicBookingResponse = {
+  readonly booking: BookingDataResponse;
+  readonly payment: {
+    readonly payment_url: string;
+    readonly transaction_id: string;
+  } | null;
+};
+
 export type { BookingInvoiceDataResponse, BookingPaymentDataResponse, BookingReceiptDataResponse, BookingStatus };
 
 export type BookingInvoiceResponse = BookingInvoiceDataResponse;
@@ -334,6 +361,23 @@ export async function getTenantRooms(
   return parseApiResponse<RoomDataResponse[]>(response);
 }
 
+export async function getTenantWebsiteRooms(
+  tenant: string,
+  token?: string | null
+): Promise<RoomDataResponse[]> {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const response = await fetch(`${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/rooms`, {
+    method: "GET",
+    headers,
+  });
+
+  return parseApiResponse<RoomDataResponse[]>(response);
+}
+
 export async function createBooking(
   token: string,
   tenant: string,
@@ -346,6 +390,78 @@ export async function createBooking(
   });
 
   return parseApiResponse<BookingDataResponse>(response);
+}
+
+export async function createPublicBooking(
+  tenant: string,
+  payload: PublicBookingPayload
+): Promise<PublicBookingResponse> {
+  const response = await fetch(`${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/public-bookings`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return parseApiResponse<PublicBookingResponse>(response);
+}
+
+export async function getPublicInvoice(
+  tenant: string,
+  invoiceId: string | number
+): Promise<BookingInvoiceDataResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/public/invoices/${encodeURIComponent(String(invoiceId))}`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+    }
+  );
+
+  return parseApiResponse<BookingInvoiceDataResponse>(response);
+}
+
+export async function getPublicInvoiceSslcommerzSuccess(
+  tenant: string,
+  invoiceNumber: string | number
+): Promise<BookingInvoiceDataResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/tenants/${encodeURIComponent(tenant)}/public/invoices/${encodeURIComponent(
+      String(invoiceNumber)
+    )}`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+    }
+  );
+
+  return parseApiResponse<BookingInvoiceDataResponse>(response);
+}
+
+export function isPublicInvoicePaid(invoice: BookingInvoiceDataResponse) {
+  const status = invoice.status?.toLowerCase();
+
+  if (status === "paid" || status === "completed" || status === "success") {
+    return true;
+  }
+
+  const amountDue = Number.parseFloat(invoice.amount_due ?? "0");
+  const amountPaid = Number.parseFloat(invoice.amount_paid ?? "0");
+  const totalAmount = Number.parseFloat(invoice.total_amount ?? "0");
+
+  if (!Number.isNaN(amountDue) && amountDue <= 0 && amountPaid > 0) {
+    return true;
+  }
+
+  if (!Number.isNaN(totalAmount) && totalAmount > 0 && amountPaid >= totalAmount) {
+    return true;
+  }
+
+  return false;
 }
 
 export async function getTenantBookings(

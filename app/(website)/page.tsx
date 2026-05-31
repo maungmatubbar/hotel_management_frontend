@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
-import { BedDouble, CalendarDays, Mail, MapPin, Phone, Search, ShieldCheck, UserRound, Users } from "lucide-react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { BedDouble, CalendarDays, Search, ShieldCheck, Users } from "lucide-react";
 import { HotelCard } from "@/components/hotel/HotelCard";
 import { Footer } from "@/components/layout/Footer";
 import { Navbar } from "@/components/layout/Navbar";
@@ -8,7 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getTenantWebsiteRooms, type RoomDataResponse } from "@/lib/tenant-api";
 import { hotels } from "@/lib/mock-data";
+import { useAuthStore } from "@/store/auth-store";
+import { useTenantStore } from "@/store/tenant-store";
 
 const popularDestinations = ["Cox's Bazar", "Dhaka", "Sylhet", "Chattogram"];
 const propertyTypes = [
@@ -18,7 +25,63 @@ const propertyTypes = [
   ["Villas", "19 properties"],
 ];
 
+function getTodayInputDate() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getRoomLabel(room: RoomDataResponse) {
+  return room.room_name || `Room ${room.id}`;
+}
+
+function parseAmount(amount: string | number | undefined) {
+  if (typeof amount === "number") {
+    return amount;
+  }
+
+  return Number((amount ?? "").replace(/[^\d.-]/g, "")) || 0;
+}
+
+function formatTk(amount: number) {
+  return `Tk ${amount.toLocaleString("en-BD")}`;
+}
+
+function getStayNights(checkIn: string, checkOut: string) {
+  const checkInDate = new Date(checkIn);
+  const checkOutDate = new Date(checkOut);
+
+  if (!checkIn || !checkOut || Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime())) {
+    return 0;
+  }
+
+  return Math.max(0, Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / 86_400_000));
+}
+
 export default function CustomerHomePage() {
+  const token = useAuthStore((state) => state.token);
+  const tenant = useTenantStore((state) => state.tenant);
+  const todayInputDate = getTodayInputDate();
+  const [selectedRoomId, setSelectedRoomId] = useState("");
+  const [checkIn, setCheckIn] = useState(todayInputDate);
+  const [checkOut, setCheckOut] = useState("");
+  const {
+    data: tenantRooms,
+    isLoading: isLoadingRooms,
+    isError: isRoomsError,
+    error: roomsError,
+  } = useQuery({
+    queryKey: ["rooms", token, tenant.id],
+    queryFn: () => getTenantWebsiteRooms(tenant.id, token),
+    enabled: Boolean(tenant.id),
+  });
+  const selectedRoom = tenantRooms?.find((room) => String(room.id) === selectedRoomId);
+  const stayNights = getStayNights(checkIn, checkOut);
+  const totalAmount = parseAmount(selectedRoom?.rate) * stayNights;
+
   return (
     <main className="overflow-hidden bg-slate-50 dark:bg-slate-950">
       <Navbar />
@@ -57,78 +120,107 @@ export default function CustomerHomePage() {
             </Card>
           </div>
 
-          <Card className="-mb-72 mt-12 border-4 border-cyan-400 bg-cyan-400 p-1 shadow-2xl shadow-slate-950/25 dark:border-cyan-400 dark:bg-cyan-400">
+          <Card className="-mb-28 mt-8 border-0 bg-white p-2 shadow-2xl shadow-slate-950/25 dark:bg-slate-900">
             <form
-              action={`/hotel/${hotels[0].slug}/booking#payment`}
-              className="grid gap-1 rounded-2xl md:grid-cols-2 lg:grid-cols-6"
+              action={`/hotel/${hotels[0].slug}/booking`}
+              className="grid gap-1.5 rounded-2xl md:grid-cols-2 lg:grid-cols-[1fr_1fr_0.75fr_0.75fr_auto] lg:items-stretch"
             >
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
+              <div className="rounded-xl bg-white p-2.5 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
                 <Label htmlFor="check-in" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                   <CalendarDays className="h-4 w-4" />
                   Check in
                 </Label>
-                <Input id="check-in" name="check_in" type="date" className="mt-2 border-slate-200" required />
+                <Input
+                  id="check-in"
+                  name="check_in"
+                  type="date"
+                  value={checkIn}
+                  min={todayInputDate}
+                  onChange={(event) => {
+                    setCheckIn(event.target.value);
+                    if (checkOut && event.target.value > checkOut) {
+                      setCheckOut("");
+                    }
+                  }}
+                  className="mt-1 h-10 border-slate-200"
+                  required
+                />
               </div>
 
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
+              <div className="rounded-xl bg-white p-2.5 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
                 <Label htmlFor="check-out" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                   <CalendarDays className="h-4 w-4" />
                   Check out
                 </Label>
-                <Input id="check-out" name="check_out" type="date" className="mt-2 border-slate-200" required />
+                <Input
+                  id="check-out"
+                  name="check_out"
+                  type="date"
+                  value={checkOut}
+                  min={checkIn || todayInputDate}
+                  onChange={(event) => setCheckOut(event.target.value)}
+                  className="mt-1 h-10 border-slate-200"
+                  required
+                />
               </div>
 
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
+              <div className="rounded-xl bg-white p-2.5 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
                 <Label htmlFor="guests" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                   <Users className="h-4 w-4" />
                   Guests
                 </Label>
-                <Input id="guests" name="guests" type="number" min="1" defaultValue="2" className="mt-2 border-slate-200" required />
+                <Input
+                  id="guests"
+                  name="guests"
+                  type="number"
+                  min="1"
+                  value={selectedRoom?.capacity ?? "2"}
+                  readOnly
+                  className="mt-1 h-10 border-slate-200"
+                  required
+                />
               </div>
 
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950">
-                <Label htmlFor="rooms" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              <div className="rounded-xl bg-white p-2.5 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
+                <Label htmlFor="room-id" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                   <BedDouble className="h-4 w-4" />
                   Rooms
                 </Label>
-                <Input id="rooms" name="rooms" type="number" min="1" defaultValue="1" className="mt-2 border-slate-200" required />
+                <select
+                  id="room-id"
+                  name="room_id"
+                  value={selectedRoomId}
+                  onChange={(event) => setSelectedRoomId(event.target.value)}
+                  className="mt-1 flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-950 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50 dark:focus:border-slate-300"
+                  disabled={isLoadingRooms || isRoomsError || !tenantRooms?.length}
+                  required
+                >
+                  <option value="">
+                    {isLoadingRooms ? "Loading rooms..." : "Select room"}
+                  </option>
+                  {tenantRooms?.map((room) => (
+                    <option key={room.id} value={room.id}>
+                      {getRoomLabel(room)}
+                    </option>
+                  ))}
+                </select>
+                {isRoomsError ? (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-300">
+                    {roomsError instanceof Error ? roomsError.message : "Failed to load rooms."}
+                  </p>
+                ) : null}
+                {selectedRoom ? (
+                  <p className="mt-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Total: {formatTk(totalAmount)} {stayNights ? `for ${stayNights} night${stayNights > 1 ? "s" : ""}` : ""}
+                  </p>
+                ) : null}
               </div>
 
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
-                <Label htmlFor="customer-address" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  <MapPin className="h-4 w-4" />
-                  Address
-                </Label>
-                <Input id="customer-address" name="customer_address" placeholder="House, road, city" className="mt-2 border-slate-200" required />
-              </div>
-
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
-                <Label htmlFor="customer-name" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  <UserRound className="h-4 w-4" />
-                  Customer name
-                </Label>
-                <Input id="customer-name" name="customer_name" placeholder="Enter full name" className="mt-2 border-slate-200" required />
-              </div>
-
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
-                <Label htmlFor="customer-email" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  <Mail className="h-4 w-4" />
-                  Email
-                </Label>
-                <Input id="customer-email" name="customer_email" type="email" placeholder="customer@example.com" className="mt-2 border-slate-200" required />
-              </div>
-
-              <div className="rounded-xl bg-white p-4 text-slate-950 dark:bg-white dark:text-slate-950 lg:col-span-2">
-                <Label htmlFor="customer-phone" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  <Phone className="h-4 w-4" />
-                  Phone
-                </Label>
-                <Input id="customer-phone" name="customer_phone" type="tel" placeholder="+880 17..." className="mt-2 border-slate-200" required />
-              </div>
+              <input type="hidden" name="total_amount" value={totalAmount ? String(totalAmount) : ""} />
 
               <Button
                 type="submit"
-                className="min-h-12 self-end rounded-xl bg-slate-950 px-5 text-sm text-white hover:bg-slate-800 dark:bg-slate-950 dark:text-white lg:col-span-1"
+                className="min-h-10 self-start rounded-xl bg-slate-950 px-4 text-sm text-white hover:bg-slate-800 dark:bg-slate-50 dark:text-slate-950 dark:hover:bg-slate-200 lg:mt-[29px]"
               >
                 <Search className="h-4 w-4" />
                 Book now
@@ -138,7 +230,7 @@ export default function CustomerHomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 pb-12 pt-64 sm:px-6 lg:px-8">
+      <section className="mx-auto max-w-7xl px-4 pb-12 pt-20 sm:px-6 lg:px-8">
         <Card className="grid overflow-hidden md:grid-cols-[0.7fr_0.3fr]">
           <div className="p-6 sm:p-8">
             <Badge variant="success">Limited-time offer</Badge>

@@ -14,13 +14,6 @@ import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 import { useTenantStore } from "@/store/tenant-store";
 
-const navItems = [
-  { label: "Hotels", href: "/" },
-  { label: "Customer Portal", href: "/customer/dashboard" },
-  { label: "Admin", href: "/admin/dashboard" },
-  { label: "Super Admin", href: "/super-admin/dashboard" },
-];
-
 function getDashboardPath(user: UserDataResponse | null): string {
   const roleNames = user?.roles.map((role) => role.name.toLowerCase()) ?? [];
 
@@ -79,18 +72,6 @@ export function Navbar() {
             <p className="text-[11px] text-slate-500 dark:text-slate-400">Multi-tenant SaaS</p>
           </div>
         </Link>
-
-        <nav className="hidden items-center gap-1 rounded-xl border border-slate-200/70 bg-slate-50/80 p-1 text-sm font-medium text-slate-600 shadow-inner dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-300 md:flex">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="rounded-lg px-3 py-1.5 transition hover:bg-white hover:text-slate-950 hover:shadow-sm dark:hover:bg-slate-800 dark:hover:text-white"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
 
         <div className="flex items-center gap-2">
           <Badge className="hidden rounded-lg border border-slate-200 bg-white/70 dark:border-slate-800 dark:bg-slate-900/70 lg:inline-flex">

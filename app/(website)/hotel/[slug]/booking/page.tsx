@@ -6,11 +6,22 @@ import { hotels } from "@/lib/mock-data";
 
 type BookingPageProps = {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<{
+    check_in?: string;
+    check_out?: string;
+    guests?: string;
+    room_id?: string;
+    total_amount?: string;
+    invoice?: string;
+    invoice_id?: string;
+  }>;
 };
 
-export default async function BookingPage({ params }: BookingPageProps) {
+export default async function BookingPage({ params, searchParams }: BookingPageProps) {
   const { slug } = await params;
+  const bookingDetails = await searchParams;
   const hotel = hotels.find((item) => item.slug === slug) ?? hotels[0];
+  const invoiceId = bookingDetails?.invoice ?? bookingDetails?.invoice_id;
 
   return (
     <main>
@@ -24,8 +35,8 @@ export default async function BookingPage({ params }: BookingPageProps) {
             Complete your booking
           </h1>
           <p className="mt-3 max-w-2xl text-slate-600">
-            Checkout UI for room dates, guest information, promo code application, and final
-            booking summary.
+            Review your stay details, add customer information, choose Pay now or Pay later,
+            then proceed with the booking.
           </p>
 
           <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6">
@@ -48,7 +59,18 @@ export default async function BookingPage({ params }: BookingPageProps) {
         </div>
 
         <aside>
-          <BookingForm />
+          <BookingForm
+            hotelName={hotel.name}
+            hotelPrice={bookingDetails?.total_amount ? `Tk ${Number(bookingDetails.total_amount).toLocaleString("en-BD")}` : hotel.price}
+            defaultValues={{
+              checkIn: bookingDetails?.check_in,
+              checkOut: bookingDetails?.check_out,
+              guests: bookingDetails?.guests,
+              roomId: bookingDetails?.room_id,
+            }}
+            initialInvoiceId={invoiceId}
+            initialInvoiceIsSslcommerzSuccess={Boolean(bookingDetails?.invoice_id)}
+          />
         </aside>
       </section>
       <Footer />
